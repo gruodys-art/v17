@@ -77,4 +77,6 @@ export const SIM = {
   fallIntegrityThreshold: 0,
   /** If average integrity below this after assault and stockpiles dry → fall */
   criticalIntegrity: 15,
+  /** After-action modal only once catch-up reaches this many minutes */
+  reportMinMinutes: 30,
 } as const

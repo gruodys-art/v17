@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { ResumeReport } from './components/ResumeReport'
 import { Theater } from './components/Theater'
 import { useSector } from './hooks/useSector'
-import type { FrontId } from '@shared/sim'
+import { SIM, type FrontId } from '@shared/sim'
 
 export default function App() {
   const {
@@ -19,7 +19,7 @@ export default function App() {
   const showReport = useMemo(() => {
     const r = sector?.pendingReport
     if (!r) return false
-    return r.minutes > 0 || r.assaults.length > 0
+    return r.minutes >= SIM.reportMinMinutes
   }, [sector?.pendingReport])
 
   if (!sector) {

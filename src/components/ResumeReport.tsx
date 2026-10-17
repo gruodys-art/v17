@@ -1,4 +1,4 @@
-import type { SectorState, TickReport } from '@shared/sim'
+import { SIM, type SectorState, type TickReport } from '@shared/sim'
 
 function frontName(state: SectorState, id: string) {
   return state.fronts.find((f) => f.id === id)?.name ?? id
@@ -7,6 +7,18 @@ function frontName(state: SectorState, id: string) {
 function fmt(n: number) {
   const sign = n > 0 ? '+' : ''
   return `${sign}${n.toFixed(1)}`
+}
+
+function formatOfflineDuration(totalMinutes: number) {
+  const hours = Math.floor(totalMinutes / 60)
+  const mins = totalMinutes % 60
+  if (hours <= 0) {
+    return `${mins} minute${mins === 1 ? '' : 's'}`
+  }
+  if (mins === 0) {
+    return `${hours} hour${hours === 1 ? '' : 's'}`
+  }
+  return `${hours}h ${mins}m`
 }
 
 export function ResumeReport({
@@ -18,20 +30,18 @@ export function ResumeReport({
   report: TickReport
   onDismiss: () => void
 }) {
-  if (report.minutes <= 0 && report.assaults.length === 0) return null
+  if (report.minutes < SIM.reportMinMinutes) return null
 
-  const hours = Math.floor(report.minutes / 60)
-  const mins = report.minutes % 60
-  const duration =
-    hours > 0 ? `${hours}h ${mins}m` : `${mins} minute${mins === 1 ? '' : 's'}`
+  const offline = formatOfflineDuration(report.minutes)
 
   return (
     <div className="report-layer" role="dialog" aria-labelledby="report-title">
       <div className="report-panel">
         <p className="report-kicker">After-action</p>
         <h2 id="report-title">While you were gone</h2>
+        <p className="report-offline">You were offline for {offline}.</p>
         <p className="report-sub">
-          {duration} of war on {state.designation}.
+          War continued on {state.designation} for the full absence.
         </p>
 
         <dl className="report-stats">
