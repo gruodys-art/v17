@@ -1,0 +1,30 @@
+---
+description: Core vision for the WH40K-inspired endless war idle/resource game
+alwaysApply: true
+---
+
+# Endless War — Game Vision
+
+Browser/mobile hybrid: **semi-resource, semi-idle, semi-incremental, semi-management, semi-planning**. Tone: grimdark endless war — attrition, logistics, faith, and attrition again.
+
+## Opening (MVP)
+
+Player has just landed / been assigned to a **new sector under constant attack**. Core loop: **hold the sector** — reinforce walls, feed the guns, rotate exhausted regiments, survive the next wave. Expansion and other theaters come later; v1 is one bleeding front.
+
+## Pillars
+
+1. **Endless war** — no true win state; fronts shift, sectors fall and rise, the galaxy burns forever. Even a "secured" sector is only quieter between assaults.
+2. **Idle + active** — offline ticks produce materiel and attrition; sessions are for planning, redeployments, and crises.
+3. **Resources as war** — ammo, fuel, recruits, faith/morale, manufactorum output — scarcity drives choices.
+4. **Planning layer** — which breach gets bodies, which battery gets shells, what burns so the hive still stands at dawn.
+5. **Lore lock** — setting, factions, tone stay inside Warhammer 40,000 reality (see lore-keeper skill). Treat commercial use of GW IP as out of scope unless the user has a license; prefer unofficial / fan framing when shipping names or art.
+
+## Architecture
+
+- **Authoritative API** (`server/`) owns tick/catch-up, commands, and persistence (`data/sector.json`).
+- **Shared sim** (`shared/sim`) is the only place war math lives; FE must not re-simulate.
+- **FE** displays snapshots and posts commands via `/api/sector*`.
+
+## Agent swarm
+
+Invoke roles via project skills under `.cursor/skills/`. Prefer orchestrator `endless-war-swarm` for multi-perspective reviews.
