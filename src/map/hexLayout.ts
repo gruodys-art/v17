@@ -1,46 +1,8 @@
-import type { FrontId } from '@shared/sim'
+import type { TerritoryHex } from '@shared/sim'
 
-/** Flat-top axial hex cell on the sector map. */
-export type HexKind = 'hub' | FrontId | 'approach'
-
-export interface HexCell {
-  q: number
-  r: number
-  kind: HexKind
-  /** Short map label */
-  tag: string
-}
-
-/**
- * Compact sector board — center is command, rim hexes belong to fronts.
- * Axial coords (q, r), flat-top.
- */
-export const SECTOR_HEXES: HexCell[] = [
-  { q: 0, r: 0, kind: 'hub', tag: 'CMD' },
-
-  // Northern Ridge
-  { q: 0, r: -2, kind: 'north', tag: 'N1' },
-  { q: 1, r: -2, kind: 'north', tag: 'N2' },
-  { q: -1, r: -1, kind: 'north', tag: 'N3' },
-  { q: 0, r: -1, kind: 'north', tag: 'N4' },
-
-  // Hab Breach-7 (southwest)
-  { q: -2, r: 1, kind: 'breach', tag: 'B1' },
-  { q: -1, r: 1, kind: 'breach', tag: 'B2' },
-  { q: -2, r: 2, kind: 'breach', tag: 'B3' },
-  { q: -1, r: 2, kind: 'breach', tag: 'B4' },
-
-  // Void Dock Spur (southeast)
-  { q: 2, r: -1, kind: 'dock', tag: 'D1' },
-  { q: 1, r: 0, kind: 'dock', tag: 'D2' },
-  { q: 2, r: 0, kind: 'dock', tag: 'D3' },
-  { q: 1, r: 1, kind: 'dock', tag: 'D4' },
-
-  // Contested approaches (visibility only)
-  { q: 1, r: -1, kind: 'approach', tag: '·' },
-  { q: -1, r: 0, kind: 'approach', tag: '·' },
-  { q: 0, r: 1, kind: 'approach', tag: '·' },
-]
+/** Re-export territory cell shape for map rendering. */
+export type HexCell = TerritoryHex
+export type HexKind = TerritoryHex['kind']
 
 export function axialToPixel(q: number, r: number, size: number) {
   const x = size * ((3 / 2) * q)

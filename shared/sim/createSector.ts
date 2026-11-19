@@ -1,14 +1,15 @@
-import type { SectorState } from './types'
-import { SIM } from './types'
+import { createCommander, RANKS } from './commander'
+import { pushOpsLog } from './opsLog'
+import type { Commander, SectorState } from './types'
+import { rollAssaultDelayMs, rollDevastatingGap } from './types'
 
-export function createSector(now = Date.now()): SectorState {
-  return {
-    version: 1,
+export function createSector(now = Date.now(), commander?: Commander): SectorState {
+  const state: SectorState = {
+    version: 3,
     designation: 'Kallis-IV · Outer Hab Rim',
     status: 'holding',
     stockpile: {
-      manpower: 180,
-      munitions: 320,
+      conscripts: 420,
       morale: 72,
     },
     fronts: [
@@ -35,8 +36,26 @@ export function createSector(now = Date.now()): SectorState {
       },
     ],
     lastSimAt: now,
-    nextAssaultAt: now + SIM.assaultIntervalMs,
+    lastWallAt: now,
+    gameSpeed: 1,
+    assaultCycleStartedAt: now,
+    nextAssaultAt: now + rollAssaultDelayMs(),
     assaultIndex: 0,
+    nextDevastatingAtIndex: rollDevastatingGap(),
     pendingReport: null,
+    opsLog: [],
+    reinforcementAccrued: 0,
+    reinforcementMinutes: 0,
+    commander: commander ? { ...commander } : createCommander(),
   }
+
+  const rank = RANKS[state.commander.rankIndex]
+  const rankTitle = rank && state.commander.rankIndex > 0 ? ` (${rank.title})` : ''
+  pushOpsLog(
+    state,
+    now,
+    'status',
+    `Command assumed${rankTitle}. Sector under greenskin pressure — hold the rim.`,
+  )
+  return state
 }

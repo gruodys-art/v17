@@ -13,7 +13,8 @@ export default function App() {
     repair,
     dismissReport,
     restart,
-    advanceMinutes,
+    setSpeed,
+    assignCommander,
   } = useSector()
 
   const showReport = useMemo(() => {
@@ -45,7 +46,8 @@ export default function App() {
         sector={sector}
         onAllocate={onAllocate}
         onRepair={repair}
-        onAdvance={advanceMinutes}
+        onSetSpeed={setSpeed}
+        onAssign={assignCommander}
         onRestart={restart}
       />
       {showReport && sector.pendingReport && (

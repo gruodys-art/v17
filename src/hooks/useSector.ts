@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchSector,
   postAckReport,
-  postAdvance,
   postAllocations,
+  postAssign,
   postRepair,
   postRestart,
+  postSpeed,
 } from '../api/sectorApi'
-import type { FrontId, SectorState } from '@shared/sim'
+import type { FrontId, GameSpeed, SectorState } from '@shared/sim'
 
 export function useSector() {
   const [sector, setSector] = useState<SectorState | null>(null)
@@ -38,16 +39,18 @@ export function useSector() {
       if (document.visibilityState === 'visible') onFocus()
     }
     document.addEventListener('visibilitychange', onVis)
+    const speed = sector?.gameSpeed ?? 1
+    const pollMs = speed >= 100 ? 1_000 : speed > 1 ? 2_000 : 10_000
     const poll = window.setInterval(() => {
       void refresh()
-    }, 30_000)
+    }, pollMs)
     return () => {
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onVis)
       window.clearInterval(poll)
       if (allocTimer.current != null) window.clearTimeout(allocTimer.current)
     }
-  }, [refresh])
+  }, [refresh, sector?.gameSpeed])
 
   const run = useCallback(
     async (fn: () => Promise<SectorState>) => {
@@ -102,9 +105,16 @@ export function useSector() {
     void run(() => postRestart())
   }, [run])
 
-  const advanceMinutes = useCallback(
-    (minutes: number) => {
-      void run(() => postAdvance(minutes))
+  const setSpeed = useCallback(
+    (speed: GameSpeed) => {
+      void run(() => postSpeed(speed))
+    },
+    [run],
+  )
+
+  const assignCommander = useCallback(
+    (frontId: FrontId | null) => {
+      void run(() => postAssign(frontId))
     },
     [run],
   )
@@ -117,7 +127,8 @@ export function useSector() {
     repair,
     dismissReport,
     restart,
-    advanceMinutes,
+    setSpeed,
+    assignCommander,
     refresh,
   }
 }

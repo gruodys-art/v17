@@ -1,7 +1,12 @@
 import { useMemo, useState } from 'react'
-import type { Front, FrontId, SectorState } from '@shared/sim'
 import {
-  SECTOR_HEXES,
+  commanderPower,
+  visibleTerritoryHexes,
+  type Front,
+  type FrontId,
+  type SectorState,
+} from '@shared/sim'
+import {
   axialToPixel,
   hexBounds,
   hexPolygonPoints,
@@ -59,18 +64,19 @@ export function HexMap({
   onSelectFront: (id: FrontId | null) => void
 }) {
   const [focusKey, setFocusKey] = useState<string | null>(null)
-  const bounds = useMemo(() => hexBounds(SECTOR_HEXES, SIZE, 32), [])
+  const hexes = useMemo(() => visibleTerritoryHexes(sector), [sector])
+  const bounds = useMemo(() => hexBounds(hexes, SIZE, 32), [hexes])
 
   const focus = useMemo((): Focus | null => {
     if (!focusKey) return null
-    const cell = SECTOR_HEXES.find((c) => cellKey(c) === focusKey)
+    const cell = hexes.find((c) => cellKey(c) === focusKey)
     if (!cell) return null
     if (cell.kind === 'hub') return { kind: 'hub' }
     if (cell.kind === 'approach') return { kind: 'approach', cell }
     const front = frontFor(cell.kind, sector)
     if (!front) return null
     return { kind: 'front', front, cell }
-  }, [focusKey, sector])
+  }, [focusKey, hexes, sector])
 
   return (
     <div className="hex-map">
@@ -80,6 +86,7 @@ export function HexMap({
           viewBox={`${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`}
           role="group"
           aria-label="Sector hex map"
+          preserveAspectRatio="xMidYMid meet"
           onMouseLeave={() => setFocusKey(null)}
         >
           <defs>
@@ -97,64 +104,97 @@ export function HexMap({
             pointerEvents="none"
           />
 
-          {SECTOR_HEXES.map((cell) => {
+          {hexes.map((cell) => {
             const { x, y } = axialToPixel(cell.q, cell.r, SIZE)
             const front = frontFor(cell.kind, sector)
             const key = cellKey(cell)
             const isSelected = front != null && selectedFrontId === front.id
             const isFocused = focusKey === key
-            // Nested g: outer keeps axial translate; inner scales without clobbering it
-            const scale = isFocused || isSelected ? 1.05 : 1
+            const isCommanded =
+              front != null && sector.commander?.assignedFrontId === front.id
 
             return (
-              <g key={key} transform={`translate(${x} ${y})`}>
-                <g
-                  className={`hex-cell hex-${cell.kind} ${isSelected ? 'selected' : ''} ${isFocused ? 'focused' : ''}`}
-                  transform={`scale(${scale})`}
-                  onMouseEnter={() => setFocusKey(key)}
-                  onFocus={() => setFocusKey(key)}
-                  onClick={() => {
-                    if (front) onSelectFront(front.id)
-                    else onSelectFront(null)
-                    setFocusKey(key)
-                  }}
-                  tabIndex={0}
-                  role="button"
-                  aria-label={
-                    front
-                      ? `${front.name}, integrity ${Math.round(front.integrity)} percent`
-                      : cell.kind === 'hub'
-                        ? 'Command hub'
-                        : 'Contested approach'
+              <g
+                key={key}
+                className={`hex-cell hex-${cell.kind} ${isSelected ? 'selected' : ''} ${isFocused ? 'focused' : ''} ${isCommanded ? 'commanded' : ''}`}
+                transform={`translate(${x} ${y})`}
+                onMouseEnter={() => setFocusKey(key)}
+                onFocus={() => setFocusKey(key)}
+                onClick={() => {
+                  if (front) onSelectFront(front.id)
+                  else onSelectFront(null)
+                  setFocusKey(key)
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={
+                  front
+                    ? `${front.name}, integrity ${Math.round(front.integrity)} percent${isCommanded ? ', commander posted' : ''}`
+                    : cell.kind === 'hub'
+                      ? 'Command hub'
+                      : 'Contested approach'
+                }
+              >
+                <polygon
+                  points={hexPolygonPoints(0, 0, SIZE - 2)}
+                  fill={fillFor(cell.kind, sector)}
+                  stroke={
+                    isCommanded && !(isSelected || isFocused)
+                      ? 'rgba(210, 170, 90, 0.95)'
+                      : strokeFor(cell.kind, isSelected || isFocused)
                   }
-                >
+                  strokeWidth={isSelected || isFocused || isCommanded ? 2.4 : 1.4}
+                />
+                {isCommanded && (
                   <polygon
-                    points={hexPolygonPoints(0, 0, SIZE - 2)}
-                    fill={fillFor(cell.kind, sector)}
-                    stroke={strokeFor(cell.kind, isSelected || isFocused)}
-                    strokeWidth={isSelected || isFocused ? 2.4 : 1.4}
+                    className="hex-cmd-ring"
+                    points={hexPolygonPoints(0, 0, SIZE - 7)}
+                    fill="none"
+                    stroke="rgba(210, 170, 90, 0.55)"
+                    strokeWidth={1.2}
+                    pointerEvents="none"
                   />
+                )}
+                <text
+                  className="hex-tag"
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  y={front ? (isCommanded ? -10 : -6) : 0}
+                  pointerEvents="none"
+                >
+                  {cell.tag}
+                </text>
+                {front && (
                   <text
-                    className="hex-tag"
+                    className="hex-mini"
                     textAnchor="middle"
                     dominantBaseline="central"
-                    y={front ? -6 : 0}
+                    y={isCommanded ? 4 : 10}
                     pointerEvents="none"
                   >
-                    {cell.tag}
+                    {Math.round(front.integrity)}
                   </text>
-                  {front && (
+                )}
+                {isCommanded && (
+                  <g className="hex-cmd-mark" pointerEvents="none" aria-hidden>
+                    <rect
+                      x={-16}
+                      y={12}
+                      width={32}
+                      height={11}
+                      rx={1.5}
+                      className="hex-cmd-badge"
+                    />
                     <text
-                      className="hex-mini"
+                      className="hex-cmd-label"
                       textAnchor="middle"
                       dominantBaseline="central"
-                      y={10}
-                      pointerEvents="none"
+                      y={17.5}
                     >
-                      {Math.round(front.integrity)}
+                      {`POST · ${commanderPower(sector)}`}
                     </text>
-                  )}
-                </g>
+                  </g>
+                )}
               </g>
             )
           })}
@@ -177,12 +217,8 @@ export function HexMap({
                   <dd>{sector.status === 'fallen' ? 'Fallen' : 'Holding'}</dd>
                 </div>
                 <div>
-                  <dt>Manpower</dt>
-                  <dd>{Math.round(sector.stockpile.manpower)}</dd>
-                </div>
-                <div>
-                  <dt>Munitions</dt>
-                  <dd>{Math.round(sector.stockpile.munitions)}</dd>
+                  <dt>Conscripts</dt>
+                  <dd>{Math.round(sector.stockpile.conscripts)}</dd>
                 </div>
                 <div>
                   <dt>Morale</dt>
@@ -208,7 +244,12 @@ export function HexMap({
           )}
           {focus?.kind === 'front' && (
             <>
-              <p className="readout-kicker">Front · {focus.cell.tag}</p>
+              <p className="readout-kicker">
+                Front · {focus.cell.tag}
+                {sector.commander?.assignedFrontId === focus.front.id
+                  ? ' · Commander'
+                  : ''}
+              </p>
               <h3>{focus.front.name}</h3>
               <dl className="readout-stats">
                 <div>
@@ -225,6 +266,12 @@ export function HexMap({
                   <dt>Commitment</dt>
                   <dd>{Math.round(focus.front.allocation * 100)}%</dd>
                 </div>
+                {sector.commander?.assignedFrontId === focus.front.id && (
+                  <div>
+                    <dt>Commander</dt>
+                    <dd>Power {commanderPower(sector)}</dd>
+                  </div>
+                )}
               </dl>
               <div className="readout-bar" aria-hidden>
                 <span

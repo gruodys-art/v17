@@ -1,4 +1,4 @@
-import type { FrontId, SectorState } from '@shared/sim'
+import type { FrontId, GameSpeed, SectorState } from '@shared/sim'
 
 async function request(path: string, init?: RequestInit): Promise<SectorState> {
   const res = await fetch(path, {
@@ -40,9 +40,16 @@ export function postRestart(): Promise<SectorState> {
   return request('/api/sector/restart', { method: 'POST' })
 }
 
-export function postAdvance(minutes: number): Promise<SectorState> {
-  return request('/api/sector/advance', {
+export function postSpeed(speed: GameSpeed): Promise<SectorState> {
+  return request('/api/sector/speed', {
     method: 'POST',
-    body: JSON.stringify({ minutes }),
+    body: JSON.stringify({ speed }),
+  })
+}
+
+export function postAssign(frontId: FrontId | null): Promise<SectorState> {
+  return request('/api/sector/assign', {
+    method: 'POST',
+    body: JSON.stringify({ frontId }),
   })
 }

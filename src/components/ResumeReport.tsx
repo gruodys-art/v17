@@ -44,17 +44,11 @@ export function ResumeReport({
           War continued on {state.designation} for the full absence.
         </p>
 
-        <dl className="report-stats">
+        <dl className="report-stats report-stats-two">
           <div>
-            <dt>Manpower</dt>
-            <dd className={report.manpowerDelta < 0 ? 'neg' : 'pos'}>
-              {fmt(report.manpowerDelta)}
-            </dd>
-          </div>
-          <div>
-            <dt>Munitions</dt>
-            <dd className={report.munitionsDelta < 0 ? 'neg' : 'pos'}>
-              {fmt(report.munitionsDelta)}
+            <dt>Conscripts</dt>
+            <dd className={report.soldiersDelta < 0 ? 'neg' : 'pos'}>
+              {fmt(report.soldiersDelta)}
             </dd>
           </div>
           <div>
@@ -80,10 +74,10 @@ export function ResumeReport({
           <div className="report-assaults">
             <h3>Assaults</h3>
             {report.assaults.map((a, i) => (
-              <p key={`${a.at}-${i}`}>
-                Wave on {frontName(state, a.frontId)} —{' '}
-                {a.survived ? 'held' : 'broken'}. Line −{a.integrityLoss}, bodies −
-                {a.manpowerLoss}, shells −{a.munitionsLoss}.
+              <p key={`${a.at}-${i}`} className={a.devastating ? 'devastating' : undefined}>
+                {a.devastating ? 'Devastating wave' : 'Wave'} on{' '}
+                {frontName(state, a.frontId)} — {a.survived ? 'held' : 'broken'}.
+                Line −{a.integrityLoss}, conscripts −{a.soldiersLost}.
               </p>
             ))}
           </div>

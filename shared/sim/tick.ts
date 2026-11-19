@@ -1,12 +1,20 @@
+import { commandHoldMult, commanderPower, grantXp, isCommanderOnFront } from './commander'
 import { createSector } from './createSector'
+import { frontLabel, pushOpsLog } from './opsLog'
 import type {
   AssaultEvent,
   Front,
   FrontId,
+  GameSpeed,
   SectorState,
   TickReport,
 } from './types'
-import { SIM } from './types'
+import {
+  GAME_SPEEDS,
+  rollAssaultDelayMs,
+  rollDevastatingGap,
+  SIM,
+} from './types'
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
@@ -19,8 +27,7 @@ function round1(n: number) {
 function emptyReport(): TickReport {
   return {
     minutes: 0,
-    manpowerDelta: 0,
-    munitionsDelta: 0,
+    soldiersDelta: 0,
     moraleDelta: 0,
     integrityDeltas: { north: 0, breach: 0, dock: 0 },
     assaults: [],
@@ -37,8 +44,7 @@ function mergeReports(a: TickReport | null, b: TickReport): TickReport {
   }
   return {
     minutes: a.minutes + b.minutes,
-    manpowerDelta: a.manpowerDelta + b.manpowerDelta,
-    munitionsDelta: a.munitionsDelta + b.munitionsDelta,
+    soldiersDelta: a.soldiersDelta + b.soldiersDelta,
     moraleDelta: a.moraleDelta + b.moraleDelta,
     integrityDeltas: {
       north: a.integrityDeltas.north + b.integrityDeltas.north,
@@ -72,33 +78,82 @@ function pickAssaultFront(fronts: Front[]): FrontId {
 function applyAssault(state: SectorState, at: number): AssaultEvent {
   const frontId = pickAssaultFront(state.fronts)
   const front = state.fronts.find((f) => f.id === frontId)!
-  const supplyFactor = clamp(
-    (state.stockpile.manpower / 80 + state.stockpile.munitions / 120) / 2,
-    0.15,
-    1.4,
-  )
-  const integrityLoss =
+  const devastating = state.assaultIndex + 1 >= state.nextDevastatingAtIndex
+  const supplyFactor = clamp(state.stockpile.conscripts / 100, 0.15, 1.4)
+  const holdMult = commandHoldMult(state, frontId)
+
+  let integrityLoss =
     (SIM.assaultIntegrityHit * (1.15 - front.allocation * 0.5)) / supplyFactor
-  const manpowerLoss = SIM.assaultManpowerHit * (1.1 - front.allocation * 0.4)
-  const munitionsLoss = SIM.assaultMunitionsHit * (1.1 - front.allocation * 0.4)
+  let soldiersLost = SIM.assaultSoldiersHit * (1.1 - front.allocation * 0.4)
+  let moraleHit = 6 / supplyFactor
+
+  if (devastating) {
+    integrityLoss *= SIM.devastatingIntegrityMult
+    soldiersLost *= SIM.devastatingSoldiersMult
+    moraleHit = SIM.devastatingMoraleHit / supplyFactor
+  }
+
+  // Commander power only hardens the front they are assigned to
+  integrityLoss *= holdMult
+  soldiersLost *= holdMult
+  moraleHit *= holdMult
 
   front.integrity = clamp(front.integrity - integrityLoss, 0, 100)
-  state.stockpile.manpower = Math.max(0, state.stockpile.manpower - manpowerLoss)
-  state.stockpile.munitions = Math.max(0, state.stockpile.munitions - munitionsLoss)
-  state.stockpile.morale = clamp(state.stockpile.morale - 6 / supplyFactor, 0, 100)
+  state.stockpile.conscripts = Math.max(0, state.stockpile.conscripts - soldiersLost)
+  state.stockpile.morale = clamp(state.stockpile.morale - moraleHit, 0, 100)
 
   const survived = state.fronts.every((f) => f.integrity > SIM.fallIntegrityThreshold)
 
   state.assaultIndex += 1
-  state.nextAssaultAt = at + SIM.assaultIntervalMs
+  state.assaultCycleStartedAt = at
+  state.nextAssaultAt = at + rollAssaultDelayMs()
+  if (devastating) {
+    state.nextDevastatingAtIndex = state.assaultIndex + rollDevastatingGap()
+  }
+
+  const lossI = round1(integrityLoss)
+  const lossS = round1(soldiersLost)
+  const name = frontLabel(state, frontId)
+  const wave = devastating ? 'Devastating assault' : 'Assault'
+  pushOpsLog(
+    state,
+    at,
+    'assault',
+    `${wave} hits ${name}. Enemy presses the line.`,
+    { frontId, devastating },
+  )
+  pushOpsLog(
+    state,
+    at,
+    'outcome',
+    survived
+      ? `Battle outcome: ${name} held. Line −${lossI}, conscripts −${lossS}.`
+      : `Battle outcome: ${name} broken. Line −${lossI}, conscripts −${lossS}. Sector collapsing.`,
+    {
+      frontId,
+      devastating,
+      survived,
+      integrityLoss: lossI,
+      soldiersLost: lossS,
+    },
+  )
+
+  if (survived) {
+    grantXp(
+      state,
+      at,
+      devastating ? SIM.xpSurviveDevastating : SIM.xpSurviveAssault,
+      devastating ? 'A devastating wave broken.' : 'Another wave broken.',
+    )
+  }
 
   return {
     at,
     frontId,
     survived,
-    integrityLoss: round1(integrityLoss),
-    manpowerLoss: round1(manpowerLoss),
-    munitionsLoss: round1(munitionsLoss),
+    devastating,
+    integrityLoss: lossI,
+    soldiersLost: lossS,
   }
 }
 
@@ -112,48 +167,45 @@ export function tickMinute(state: SectorState, endAt: number): TickReport {
   const fronts = normalizeAllocations(state.fronts)
   state.fronts = fronts
 
-  const manGain = SIM.manpowerIncomePerMin
-  const munGain = SIM.munitionsIncomePerMin
+  const soldierGain = SIM.conscriptsIncomePerMin
   let morGain = SIM.moraleIncomePerMin * (state.stockpile.morale < 40 ? 0.5 : 1)
 
-  let manSpend = 0
-  let munSpend = 0
+  let soldierSpend = 0
 
   for (const front of fronts) {
     const committed = Math.max(front.allocation, 0.05)
-    const neededMun = front.pressure * SIM.munitionsPerPressure
-    const neededMan = front.pressure * SIM.manpowerPerPressure
+    const needed = front.pressure * SIM.conscriptsPerPressure
     const fed = clamp(
       Math.min(
-        state.stockpile.munitions / Math.max(neededMun, 0.01),
-        state.stockpile.manpower / Math.max(neededMan, 0.01),
+        state.stockpile.conscripts / Math.max(needed, 0.01),
         committed / 0.35,
       ),
       0,
       1.5,
     )
 
-    munSpend += neededMun * committed
-    manSpend += neededMan * committed
+    soldierSpend += needed * committed
 
     const starve = 1 - clamp(fed, 0, 1)
     let integrityLoss =
       SIM.integrityStarvePerMin * starve * (0.6 + front.pressure * 0.15)
-    if (state.stockpile.munitions <= 0 || state.stockpile.manpower <= 0) {
+    if (state.stockpile.conscripts <= 0) {
       integrityLoss *= SIM.emptyStockpileIntegrityMult
     }
-    const repair = fed > 1 ? 0.08 * (fed - 1) : 0
+    integrityLoss *= commandHoldMult(state, front.id)
+    let repair = fed > 1 ? 0.08 * (fed - 1) : 0
+    if (isCommanderOnFront(state, front.id)) {
+      repair += commanderPower(state) * 0.04
+    }
     const delta = repair - integrityLoss
     front.integrity = clamp(front.integrity + delta, 0, 100)
     report.integrityDeltas[front.id] += round1(delta)
   }
 
-  const manBefore = state.stockpile.manpower
-  const munBefore = state.stockpile.munitions
+  const soldiersBefore = state.stockpile.conscripts
   const morBefore = state.stockpile.morale
 
-  state.stockpile.manpower = Math.max(0, manBefore + manGain - manSpend)
-  state.stockpile.munitions = Math.max(0, munBefore + munGain - munSpend)
+  state.stockpile.conscripts = Math.max(0, soldiersBefore + soldierGain - soldierSpend)
 
   const avgIntegrity =
     fronts.reduce((s, f) => s + f.integrity, 0) / Math.max(fronts.length, 1)
@@ -161,19 +213,55 @@ export function tickMinute(state: SectorState, endAt: number): TickReport {
   if (avgIntegrity < 25) morGain -= 0.35
   state.stockpile.morale = clamp(morBefore + morGain, 0, 100)
 
-  report.manpowerDelta = round1(state.stockpile.manpower - manBefore)
-  report.munitionsDelta = round1(state.stockpile.munitions - munBefore)
+  report.soldiersDelta = round1(state.stockpile.conscripts - soldiersBefore)
   report.moraleDelta = round1(state.stockpile.morale - morBefore)
+
+  grantXp(state, endAt, SIM.xpPerMinuteHeld, 'Hours on the line.')
+
+  state.reinforcementAccrued = (state.reinforcementAccrued ?? 0) + soldierGain
+  state.reinforcementMinutes = (state.reinforcementMinutes ?? 0) + 1
+  if (state.reinforcementMinutes >= SIM.reinforcementLogEveryMinutes) {
+    const arrived = round1(state.reinforcementAccrued)
+    if (arrived > 0) {
+      pushOpsLog(
+        state,
+        endAt,
+        'reinforcements',
+        `Reinforcements arriving: +${arrived} conscripts from the rear echelons.`,
+        { conscripts: arrived },
+      )
+    }
+    state.reinforcementAccrued = 0
+    state.reinforcementMinutes = 0
+  }
 
   if (endAt >= state.nextAssaultAt) {
     const assault = applyAssault(state, state.nextAssaultAt)
     report.assaults.push(assault)
-    if (!assault.survived) state.status = 'fallen'
+    if (!assault.survived) {
+      state.status = 'fallen'
+      pushOpsLog(
+        state,
+        endAt,
+        'fallen',
+        'Sector fallen. The Administratum will assign another corpse to this desk.',
+      )
+    }
   }
 
   const anyZero = state.fronts.some((f) => f.integrity <= SIM.fallIntegrityThreshold)
-  if (anyZero && state.fronts.every((f) => f.integrity <= 5)) {
+  if (
+    state.status !== 'fallen' &&
+    anyZero &&
+    state.fronts.every((f) => f.integrity <= 5)
+  ) {
     state.status = 'fallen'
+    pushOpsLog(
+      state,
+      endAt,
+      'fallen',
+      'Sector fallen. All fronts reduced to ruin.',
+    )
   }
 
   state.lastSimAt = endAt
@@ -224,15 +312,23 @@ export function repairFront(state: SectorState, frontId: FrontId): SectorState {
   const next = structuredClone(state)
   const front = next.fronts.find((f) => f.id === frontId)
   if (!front) return state
-  if (
-    next.stockpile.manpower < SIM.repairIntegrityCostManpower ||
-    next.stockpile.munitions < SIM.repairIntegrityCostMunitions
-  ) {
+  if (front.integrity >= 100) return state
+  if (next.stockpile.conscripts < SIM.repairIntegrityCostConscripts) {
     return state
   }
-  next.stockpile.manpower -= SIM.repairIntegrityCostManpower
-  next.stockpile.munitions -= SIM.repairIntegrityCostMunitions
-  front.integrity = clamp(front.integrity + SIM.repairIntegrityAmount, 0, 100)
+  const repairAmount =
+    SIM.repairIntegrityAmount +
+    (isCommanderOnFront(next, frontId) ? commanderPower(next) : 0)
+  next.stockpile.conscripts -= SIM.repairIntegrityCostConscripts
+  front.integrity = clamp(front.integrity + repairAmount, 0, 100)
+  pushOpsLog(
+    next,
+    next.lastSimAt,
+    'repair',
+    `Work gangs shore up ${front.name}: +${repairAmount} integrity (−${SIM.repairIntegrityCostConscripts} conscripts).`,
+    { frontId, conscripts: SIM.repairIntegrityCostConscripts },
+  )
+  grantXp(next, next.lastSimAt, SIM.xpRepair, 'Fortifications renewed.')
   return next
 }
 
@@ -240,23 +336,49 @@ export function acknowledgeReport(state: SectorState): SectorState {
   return { ...state, pendingReport: null }
 }
 
-export function restartSector(now = Date.now()): SectorState {
-  return createSector(now)
+export function restartSector(now = Date.now(), previous?: SectorState): SectorState {
+  // Commander XP and rank persist — only the dirt changes.
+  return createSector(now, previous?.commander)
 }
 
-/** Resolve N minutes of war, then re-anchor clocks to wall time `now`. */
-export function advanceMinutes(
-  state: SectorState,
-  minutes: number,
-  now = Date.now(),
-): SectorState {
-  const synced = catchUp(state, now)
-  const end = synced.lastSimAt + minutes * 60_000
-  const advanced = catchUp(synced, end)
-  const assaultRemaining = Math.max(0, advanced.nextAssaultAt - end)
+/** Current game-clock time given wall clock and speed. */
+export function estimateSimNow(state: SectorState, wallNow = Date.now()): number {
+  const speed = state.gameSpeed || 1
+  const lastWall = state.lastWallAt ?? state.lastSimAt
+  return state.lastSimAt + Math.max(0, wallNow - lastWall) * speed
+}
+
+/** Apply wall-time elapsed × gameSpeed onto the sim clock, then catch up ticks. */
+export function syncFromWall(state: SectorState, wallNow = Date.now()): SectorState {
+  const simTarget = estimateSimNow(state, wallNow)
+  const next = catchUp(state, simTarget)
   return {
-    ...advanced,
-    lastSimAt: now,
-    nextAssaultAt: now + assaultRemaining,
+    ...next,
+    lastWallAt: wallNow,
+    gameSpeed: (GAME_SPEEDS as readonly number[]).includes(next.gameSpeed)
+      ? next.gameSpeed
+      : 1,
   }
+}
+
+export function setGameSpeed(
+  state: SectorState,
+  speed: GameSpeed,
+  wallNow = Date.now(),
+): SectorState {
+  if (!(GAME_SPEEDS as readonly number[]).includes(speed)) {
+    throw new Error(`speed must be one of ${GAME_SPEEDS.join(', ')}`)
+  }
+  const synced = syncFromWall(state, wallNow)
+  if (synced.gameSpeed === speed) {
+    return { ...synced, lastWallAt: wallNow }
+  }
+  pushOpsLog(
+    synced,
+    synced.lastSimAt,
+    'command',
+    `Chronometers reset — war tempo now ${speed}×.`,
+    { speed },
+  )
+  return { ...synced, gameSpeed: speed, lastWallAt: wallNow }
 }
